@@ -217,7 +217,7 @@ def incentive_to_lie(algorithm, lhs, rhs, agent_id, agent_side):
     return incentive, best_lie
 
 def generate_entities(n, num_ranking):
-    """ """
+    """ Generates an Entity object with n rankings and preferences """
     ret = {}
     for i in range(n):
         ret[i] = Entity(i)
@@ -227,7 +227,24 @@ def generate_entities(n, num_ranking):
 def main():
 
     num_tests = 100
-    sizes = [(4,4), (16,16), (32,32), (64, 64), (128, 128), (256, 256)]
+
+    #test size
+    #sizes = [(4,4)]
+
+    # speed tests, don't run these when checking for incentive to lie
+    sizes = [(4,4), (8,8), (16,16), (32,32), (64, 64), (128, 128), (256, 256), (512,512), (1024,1024), (2048,2048)]
+
+
+    # full tests, these are expensive
+    #sizes = [(8,8), (9,9), (10, 10)]
+
+    # fast tests
+    #sizes = [(4,4), (7,3), (8,2), (8,4)] 
+    #sizes = [(4,2), (4,3), (4,4), (4,5), (4,6), (4,7), (4,8), (6,2), (6,4), (6,6), (8,2), (8,4), (8,6), (2, 8), (6,8)] 
+
+    test_lie = False
+    test_blocking = True
+    show_grid = False
 
     for size in sizes:
         print "SIZE (s,e): ", size
@@ -237,30 +254,36 @@ def main():
             "coop_cost": [],
             "coop_time": [],
             "da_time": [],
-            "avg_s_lie_coop": [],
-            "avg_e_lie_coop": [],
             "da_cost": [],
-            "avg_e_lie_da": []
         }
+
+        if test_lie:
+            data["avg_s_lie_coop"] = []
+            data["avg_e_lie_coop"] = []
+            data["avg_e_lie_da"] = []
+        if test_blocking:
+            data["num_coop_blocking_pairs"] = []
+            data["avg_coop_blocking_pairs_imp"] = []
+
+            
 
         for t in range(num_tests):
             s = generate_entities(num_students, num_employers)
             e = generate_entities(num_employers, num_students)
 
-            #print "Grid"
-            #tmp = "\t"
-            #for j in range(num_employers):
-            #    tmp += "e%s\t" % (j)
-            #print tmp
+            if show_grid:
+                print "Grid"
+                tmp = "\t"
+                for j in range(num_employers):
+                    tmp += "e%s\t" % (j)
+                print tmp
 
-            #for i in range(num_students):
-            #    tmp = "s%s\t" % (i)
-            #    for j in range(num_employers):
-            #        tmp += "(%s,%s)\t"  % (s[i].rankings[j], e[j].rankings[i])
-            #    #print s[i].rankings, e[i].rankings
-            #     print tmp
-            #    #print zip(s[i].rankings, e[i].rankings)
-            #     print "--------------------\nResults:"
+                for i in range(num_students):
+                    tmp = "s%s\t" % (i)
+                    for j in range(num_employers):
+                        tmp += "(%s,%s)\t"  % (s[i].rankings[j], e[j].rankings[i])
+                    print tmp
+                print "--------------------\nResults:"
 
             start = timer()
             [cost_coop, pairs_coop] = coop_matching(s, e)
@@ -268,40 +291,61 @@ def main():
             data['coop_time'].append(end - start)
             data['coop_cost'].append(cost_coop)
 
+            if test_blocking:
+                blocking_pairs = []
+                blocking_imp = []
+
+                # Check all possible swaps in resulting pairs to see if a better result can be achieved
+                for pair in pairs_coop:
+                    for opair in pairs_coop:
+                        if pair != opair:
+                            total_cost = pair[2] + opair[2]
+                            s1 = pair[0]
+                            s2 = opair[0]
+                            e1 = pair[1]
+                            e2 = opair[1]
+                            new_cost = s[s1][e2] + s[s2][e1] + e[e1][s2] + e[e2][s1]
+                            #check if both pairs are strictly better off
+                            if e[e2][s1] <= e[e2][s2] and s[s1][e2] <= s[s1][e1] and e[e1][s2] <= e[e1][s1] and s[s2][e1] <= s[s2][e2]:
+                            # check if both pairs agents are better off in some way (but not each individual agent)
+                            #if new_cost < total_cost:
+                                blocking_pairs.append((pair, opair))
+                                blocking_imp.append(total_cost - new_cost)
+                num_bp = len(blocking_pairs) / 2
+                data['num_coop_blocking_pairs'].append(num_bp) # since a pair shows up twice
+                if num_bp > 0:
+                    data['avg_coop_blocking_pairs_imp'].append(np.mean(blocking_imp)) # since a pair shows up twice
+                else:
+                    data['avg_coop_blocking_pairs_imp'].append(0) # since a pair shows up twice
+
             start = timer()
             [cost_def, pairs_def] = deferred_acceptance(s, e)
             end = timer()
             data['da_cost'].append(cost_def)
             data['da_time'].append(end - start)
 
-            avg_e_lie_da = []
-            avg_e_lie_coop = []
-            for y in range(0, num_employers):
-                [i_da, _] = incentive_to_lie(deferred_acceptance, s, e, y, e)
-                [i_coop, _] = incentive_to_lie(coop_matching, s, e, y, e)
-                avg_e_lie_da.append(i_da)
-                avg_e_lie_coop.append(i_coop)
+            if test_lie:
+                # test employer lies for co-op and DA
+                avg_e_lie_da = []
+                avg_e_lie_coop = []
+                for y in range(0, num_employers):
+                    [i_da, _] = incentive_to_lie(deferred_acceptance, s, e, y, e)
+                    [i_coop, _] = incentive_to_lie(coop_matching, s, e, y, e)
+                    avg_e_lie_da.append(i_da)
+                    avg_e_lie_coop.append(i_coop)
 
-            avg_s_lie_coop = []
-            for y in range(0, num_students):
-                [i, _] = incentive_to_lie(deferred_acceptance, s, e, y, s)
-                avg_s_lie_coop.append(i_coop)
+                # test student lies for co-op matching
+                avg_s_lie_coop = []
+                for y in range(0, num_students):
+                    [i, _] = incentive_to_lie(deferred_acceptance, s, e, y, s)
+                    avg_s_lie_coop.append(i_coop)
 
-            data["avg_s_lie_coop"].append(np.mean(avg_s_lie_coop))
-            data["avg_e_lie_coop"].append(np.mean(avg_e_lie_coop))
-            data["avg_e_lie_da"].append(np.mean(avg_e_lie_da))
+                data["avg_s_lie_coop"].append(np.mean(avg_s_lie_coop))
+                data["avg_e_lie_coop"].append(np.mean(avg_e_lie_coop))
+                data["avg_e_lie_da"].append(np.mean(avg_e_lie_da))
 
+        # show results
         print pd.DataFrame(data).describe()
-#        print "group size:", z
-#        print "incentive:", average_incentive
-#        print "original statement:", s[1].preferences
-#        print "best_lie:", best_lie
-    #    print "Co-op Matching"
-    #    print "\tcost:", cost_coop
-    #    print "\tmatching", pairs_coop
-    #    print "Deferred Acceptance Matching"
-    #    print "\tcost:", cost_def
-    #    print "\tmatching:", pairs_def
 
 if __name__ == '__main__':
     main()
